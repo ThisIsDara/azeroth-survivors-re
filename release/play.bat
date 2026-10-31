@@ -1,5 +1,5 @@
 @echo off
-rem Play Azeroth Survivors — run the local server, then open the game in the default browser.
+rem Play Azeroth Survivors - run the local server, then open the game in the default browser.
 cd /d "%~dp0"
 if not exist "Data\terrain.MPQ" (
     echo no game data yet - fetch it first ^(Start menu: Azeroth Survivors -^> Fetch game data^)

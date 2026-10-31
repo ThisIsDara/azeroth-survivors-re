@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$AssetBase,
     [string]$InstallDir   # {app} of the Inno setup, no backslash; defaults next to this file
 )
-# fetch-data.ps1 — the Azeroth Survivors Windows data fetcher. Pulls the WoW 1.12.1 client's
+# fetch-data.ps1 - the Azeroth Survivors Windows data fetcher. Pulls the WoW 1.12.1 client's
 # Data folder as the release's ~1.9 GiB chunks, resumable (HTTP Range), checksummed per chunk
 # against assets.sha256, then reassembles, unpacks to .\Data, and cleans up.
 #
@@ -66,7 +66,7 @@ function Get-RangeResumable([string]$Url, [string]$Dest) {
     if ($have -gt 0 -and [int]$resp.StatusCode -ne 206) {
         $resp.Close()
         Remove-Item $Dest -Force
-        throw "$name resume unsupported by the server — deleted $Dest, re-run to fetch whole"
+        throw "$name resume unsupported by the server - deleted $Dest, re-run to fetch whole"
     }
     $total = $have + [long]$resp.ContentLength
     $src = $resp.GetResponseStream()
@@ -98,7 +98,7 @@ foreach ($name in $names) {
     Write-Host "verifying $name"
     $got = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower()
     if ($got -ne $shaMap[$name]) {
-        throw "checksum mismatch on $name — re-run the fetcher (resumes); if it persists, delete $chunks"
+        throw "checksum mismatch on $name - re-run the fetcher (resumes); if it persists, delete $chunks"
     }
 }
 
@@ -119,7 +119,7 @@ Set-Content -Encoding ascii -NoNewline (Join-Path $data '.ready') 'ok'
 Write-Host 'cleaning up'
 Remove-Item $chunks -Recurse -Force
 if (-not (Test-Path (Join-Path $data 'terrain.MPQ'))) {
-    throw "Data\terrain.MPQ missing after unpack — check $InstallDir for a partial Data folder"
+    throw "Data\terrain.MPQ missing after unpack - check $InstallDir for a partial Data folder"
 }
 
-Write-Host "done — the game data is in $data. Run play.lnk / Play Azeroth Survivors."
+Write-Host "done - the game data is in $data. Run play.lnk / Play Azeroth Survivors."
