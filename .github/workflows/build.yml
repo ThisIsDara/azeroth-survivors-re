@@ -1,0 +1,56 @@
+# A manual build of the browser client: the same chain as `make build` minus the game-data
+# fetch (the data is served separately by wenilla-host, never part of web/dist). Runners have the
+# RAM and disk a small local box lacks — download the artifact, unzip into web/dist/, then
+# `make fetch-data && make start`.
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Rendering backend
+        type: choice
+        options: [webgpu, webgl2]
+        default: webgpu
+      debug:
+        description: Keep wasm symbols (WEB_DEBUG=1) for readable stack traces
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      # No debuginfo: it is most of target/, and a runner's disk is small.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      WEB_BACKEND: ${{ inputs.backend }}
+      WEB_DEBUG: ${{ inputs.debug && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: brotli (precompressed siblings for the host)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq brotli
+      - name: Toolchain
+        run: rustup toolchain install && rustc -V
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: build-wasm
+          # wasi-sdk and binaryen land in tools/, wasm-bindgen-cli in ~/.cargo/bin.
+          cache-directories: tools
+      - name: toolchain (scripts/web-setup.sh)
+        run: scripts/web-setup.sh
+      - name: build (scripts/web-build.sh)
+        run: scripts/web-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 14
