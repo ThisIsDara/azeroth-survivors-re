@@ -125,6 +125,9 @@ jobs:
             throw "unexpected startup output:`n$out"
           }
           Write-Host "smoke OK — exec runs, startup reaches the MPQ scan"
+          # The last native exit code (the expected startup failure) would otherwise become this
+          # step's exit code; PowerShell leaves that to be fixed by an explicit exit.
+          exit 0
       - name: fetch-data.ps1 parse check
         shell: pwsh
         run: |
