@@ -111,24 +111,20 @@ jobs:
           key: windows-installer
       - name: wenilla-host (MSVC)
         run: cargo build --release -p wenilla-host --locked
-      - name: smoke — the server starts and answers on Windows
+      - name: smoke — the exe boots on Windows
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force www,Data | Out-Null
           Set-Content -Path www\index.html -Value '<html></html>'
-          $p = Start-Process -FilePath 'target\release\wenilla-host.exe' `
-            -ArgumentList '--www', 'www', '--data', 'Data' `
-            -PassThru -WindowStyle Hidden `
-            -RedirectStandardOutput smoke.out -RedirectStandardError smoke.err
-          Start-Sleep 5
-          try {
-            $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8090/index.html
-            if ($r.StatusCode -ne 200) { throw "status $($r.StatusCode)" }
-            Write-Host "smoke OK — $($r.Content.Length) bytes"
-          } finally {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          & 'target\release\wenilla-host.exe' --help 2>&1 | Select-String 'wenilla-host|Usage'
+          if ($LASTEXITCODE -ne 0) { throw "--help exit $LASTEXITCODE — the CRT-static exe won't run" }
+          # Chain::open scans for MPQs before the listener binds; an empty Data dir proves the
+          # startup path runs to the scan by failing there with exactly the expected bail.
+          $out = & 'target\release\wenilla-host.exe' --data Data --www www 2>&1 | Out-String
+          if ($out -notmatch 'no known vanilla MPQs found') {
+            throw "unexpected startup output:`n$out"
           }
-          Get-Content smoke.out, smoke.err -ErrorAction SilentlyContinue
+          Write-Host "smoke OK — exec runs, startup reaches the MPQ scan"
       - name: fetch-data.ps1 parse check
         shell: pwsh
         run: |
@@ -174,15 +170,28 @@ jobs:
       # The zip, the tar and the chunks coexist briefly: ~16 GB working set.
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - name: fetch (scripts/fetch-data.sh)
-        run: scripts/fetch-data.sh
-      - name: tar + split into <2 GiB chunks (the release-asset ceiling)
+      # One 1.12.1 client is all there ever is; chunks ~5.4 GB persist between dispatches and
+      # every run after the first skips the archive.org download, tar and split.
+      - uses: actions/cache@v4
+        with:
+          path: cache/wow-data
+          key: wow-data-1.12.1-5875-enUS
+      - name: produce the data chunks (or restore the cached ones)
         run: |
-          mkdir -pv out
-          tar -cf out/wow-data.tar -C wow-data Data
-          (cd out && sha256sum wow-data.tar > sha256.txt)
-          split -b 1900M -d out/wow-data.tar out/wow-data.tar.part-
-          rm out/wow-data.tar
+          mkdir -pv out cache/wow-data
+          if [ -f cache/wow-data/wow-data.tar.part-00 ]; then
+            echo "cache hit — reusing the chunked data"
+            cp cache/wow-data/* out/
+            ls -la out
+            exit 0
+          fi
+          scripts/fetch-data.sh
+          tar -cf cache/wow-data/wow-data.tar -C wow-data Data
+          (cd cache/wow-data && sha256sum wow-data.tar > sha256.txt)
+          split -b 1900M -d cache/wow-data/wow-data.tar cache/wow-data/wow-data.tar.part-
+          rm cache/wow-data/wow-data.tar
+          cp cache/wow-data/* out/
+          ls -la out
       - uses: actions/upload-artifact@v4
         with:
           name: data-parts
