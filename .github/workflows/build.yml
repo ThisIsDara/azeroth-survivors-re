@@ -4,7 +4,7 @@
 #   - prebuilt wenilla-host binaries (linux), always
 #   - an Inno Setup installer for Windows (client + host + data fetcher), always
 #   - a GitHub release (tag from the `tag` input) with: the installer, client tarball, host
-#     binaries, and â€” when the `data` input is on â€” the WoW 1.12.1 client split into
+#     binaries, and -- when the `data` input is on -- the WoW 1.12.1 client split into
 #     <2 GiB chunks, the release-asset ceiling. Runners have the RAM and disk a small
 #     local box lacks.
 #
@@ -113,20 +113,20 @@ jobs:
           key: windows-installer
       - name: wenilla-host (MSVC)
         run: cargo build --release -p wenilla-host --locked
-      - name: smoke â€” the exe boots on Windows
+      - name: smoke - the exe boots on Windows
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force www,Data | Out-Null
           Set-Content -Path www\index.html -Value '<html></html>'
           & 'target\release\wenilla-host.exe' --help 2>&1 | Select-String 'wenilla-host|Usage'
-          if ($LASTEXITCODE -ne 0) { throw "--help exit $LASTEXITCODE â€” the CRT-static exe won't run" }
+          if ($LASTEXITCODE -ne 0) { throw "--help exit $LASTEXITCODE - the CRT-static exe won't run" }
           # Chain::open scans for MPQs before the listener binds; an empty Data dir proves the
           # startup path runs to the scan by failing there with exactly the expected bail.
           $out = & 'target\release\wenilla-host.exe' --data Data --www www 2>&1 | Out-String
           if ($out -notmatch 'no known vanilla MPQs found') {
             throw "unexpected startup output:`n$out"
           }
-          Write-Host "smoke OK â€” exec runs, startup reaches the MPQ scan"
+          Write-Host "smoke OK - exec runs, startup reaches the MPQ scan"
           # The last native exit code (the expected startup failure) would otherwise become this
           # step's exit code; PowerShell leaves that to be fixed by an explicit exit.
           exit 0
@@ -185,7 +185,7 @@ jobs:
         run: |
           mkdir -pv out cache/wow-data
           if [ -f cache/wow-data/wow-data.tar.part-00 ]; then
-            echo "cache hit â€” reusing the chunked data"
+            echo "cache hit - reusing the chunked data"
             cp cache/wow-data/* out/
             ls -la out
             exit 0
@@ -250,19 +250,19 @@ jobs:
       - name: publish (one moving release, replaced on each run)
         run: |
           {
-            echo "Azeroth Survivors â€” portable bundle, built $(date -u +%Y-%m-%d\ %H:%M\ UTC) from ${GITHUB_SHA}"
+            echo "Azeroth Survivors - portable bundle, built $(date -u +%Y-%m-%d\ %H:%M\ UTC) from ${GITHUB_SHA}"
             echo
             echo "| asset | what |"
             echo "| --- | --- |"
-            echo "| azeroth-survivors-setup.exe | **the Windows installer** â€” client, wenilla-host.exe and launcher; fetches the WoW data into the install's Data folder on first run |"
+            echo "| azeroth-survivors-setup.exe | **the Windows installer** - client, wenilla-host.exe and launcher; fetches the WoW data into the install's Data folder on first run |"
             echo "| client.tar.gz + install.sh | the browser client and the cross-platform host installer |"
             echo "| host.tar.gz | prebuilt wenilla-host server binaries (linux) |"
             if [ -d stage/data ]; then
               echo "| wow-data.tar.part-* | the WoW 1.12.1 client's Data folder, split below GitHub's 2 GiB per-asset ceiling |"
               echo "| sha256.txt | checksum of the data, as one concatenated stream |"
               echo
-              echo "Bundled data is Blizzard game content, hosted by explicit request of the repo owner. **Legal note:** the project itself ships none of it â€” see the README and archive.org."
+              echo "Bundled data is Blizzard game content, hosted by explicit request of the repo owner. **Legal note:** the project itself ships none of it - see the README and archive.org."
             fi
           } > notes.md
           gh release delete "${TAG}" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "${TAG}" --title "Azeroth Survivors â€” ${TAG}" --notes-file notes.md --latest assets/*
+          gh release create "${TAG}" --title "Azeroth Survivors - ${TAG}" --notes-file notes.md --latest assets/*
