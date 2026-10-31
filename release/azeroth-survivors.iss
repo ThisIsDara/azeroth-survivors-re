@@ -1,8 +1,8 @@
-; Inno Setup script — the Azeroth Survivors Windows installer.
+; Inno Setup script - the Azeroth Survivors Windows installer.
 ; Compiled by the build workflow:
 ;   ISCC /DAssetBase=<release url> /DBuildStamp=<date sha> /Osetup release\azeroth-survivors.iss
 ;
-; The game data is NOT inside this exe — the WoW 1.12.1 client (~5.5 GB) busts GitHub's 2 GiB
+; The game data is NOT inside this exe - the WoW 1.12.1 client (~5.5 GB) busts GitHub's 2 GiB
 ; per-asset ceiling, so it publishes as the release's ~1.9 GiB chunks that fetch-data.ps1
 ; pulls into <install>\Data on first run (also from Start menu: "Fetch game data").
 
@@ -34,7 +34,7 @@ Name: "{autodesktop}\Play Azeroth Survivors"; Filename: "{app}\play.bat"; Workin
 
 [Run]
 Filename: "{app}\fetch-data.bat"; Description: "Download the game data now (~5.5 GB, needs internet; resumable if interrupted)"; Flags: postinstall runasoriginaluser
-Filename: "{app}\play.bat"; Description: "Play now"; Flags: postinstall postunchecked skipifsilent runasoriginaluser
+Filename: "{app}\play.bat"; Description: "Play now"; Flags: postinstall unchecked skipifsilent runasoriginaluser
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.data-parts"
