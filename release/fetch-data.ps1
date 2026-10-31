@@ -11,6 +11,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
 if (-not $InstallDir) { $InstallDir = $PSScriptRoot }
 $chunks = Join-Path $InstallDir '.data-parts'
 $data   = Join-Path $InstallDir 'Data'
@@ -22,11 +24,14 @@ if ((Test-Path (Join-Path $data 'terrain.MPQ')) -and (Test-Path (Join-Path $data
 New-Item -ItemType Directory -Force $chunks | Out-Null
 
 $shaMap = @{}
-(Invoke-WebRequest -UseBasicParsing "$AssetBase/assets.sha256").Content -split "`n" | ForEach-Object {
+$rawText = (New-Object Net.WebClient).DownloadString("$AssetBase/assets.sha256")
+$rawText -split "`r?`n" | ForEach-Object {
     $line = $_.Trim()
     if ($line) {
         $parts = $line -split '\s+', 2
-        $shaMap[$parts[1].Trim()] = $parts[0].ToLower()
+        if ($parts.Count -ge 2) {
+            $shaMap[$parts[1].Trim()] = $parts[0].ToLower()
+        }
     }
 }
 
@@ -38,7 +43,7 @@ for ($i = 0; $i -lt 8; $i++) {
     $names += $name
 }
 if (-not $names) {
-    Write-Host "this release has no game-data chunks (the build workflow's `data` input was off)"
+    Write-Host "this release has no game-data chunks (the build workflow's data input was off)"
     exit 1
 }
 
@@ -53,14 +58,16 @@ function Get-RangeResumable([string]$Url, [string]$Dest) {
     $req = [Net.HttpWebRequest]::Create($Url)
     $req.UserAgent = 'azeroth-survivors-installer'
     $req.AllowAutoRedirect = $true
-    if ($have -gt 0) { $req.Headers['Range'] = "bytes=$have-" }
+    if ($have -gt 0) { $req.AddRange([long]$have) }
 
     try
     {
         $resp = $req.GetResponse()
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        if ($code -eq 416) { Write-Host "  $name already complete"; return }  # range satisfied, file done
+    } catch [Net.WebException] {
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 416) {
+            Write-Host "  $name already complete"
+            return
+        }
         throw
     }
     if ($have -gt 0 -and [int]$resp.StatusCode -ne 206) {
