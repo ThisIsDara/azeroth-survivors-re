@@ -1,9 +1,10 @@
 # A manual build of the browser client: the same chain as `make build`, handed back as
 #
 #   - a `web-dist` run artifact (raw web/dist), always
-#   - prebuilt wenilla-host binaries (linux + windows), always
-#   - a GitHub release (tag from the `tag` input) with: client tarball, host binaries, an
-#     installer, and — when the `data` input is on — the WoW 1.12.1 client split into
+#   - prebuilt wenilla-host binaries (linux), always
+#   - an Inno Setup installer for Windows (client + host + data fetcher), always
+#   - a GitHub release (tag from the `tag` input) with: the installer, client tarball, host
+#     binaries, and — when the `data` input is on — the WoW 1.12.1 client split into
 #     <2 GiB chunks, the release-asset ceiling. Runners have the RAM and disk a small
 #     local box lacks.
 #
@@ -75,31 +76,92 @@ jobs:
     timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
-      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
         with:
           key: host-bins
-      - name: mingw (the windows cross target)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mingw-w64
       - name: linux binary
         run: cargo build --release -p wenilla-host --locked
-      - name: windows binary
-        run: cargo build --release -p wenilla-host --locked --target x86_64-pc-windows-gnu
       - name: pack
         run: |
           mkdir -pv out
           cp target/release/wenilla-host out/wenilla-host-linux-x86_64
-          cp target/x86_64-pc-windows-gnu/release/wenilla-host.exe out/wenilla-host-windows-x86_64.exe
-          for f in out/*; do gzip -9 "$f"; done
+          gzip -9 out/wenilla-host-linux-x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: host-bins
           path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      # A host binary with no runtime dependency on the VC++ redistributables.
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-installer
+      - name: wenilla-host (MSVC)
+        run: cargo build --release -p wenilla-host --locked
+      - name: smoke — the server starts and answers on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force www,Data | Out-Null
+          Set-Content -Path www\index.html -Value '<html></html>'
+          $p = Start-Process -FilePath 'target\release\wenilla-host.exe' `
+            -ArgumentList '--www', 'www', '--data', 'Data' `
+            -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput smoke.out -RedirectStandardError smoke.err
+          Start-Sleep 5
+          try {
+            $r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8090/index.html
+            if ($r.StatusCode -ne 200) { throw "status $($r.StatusCode)" }
+            Write-Host "smoke OK — $($r.Content.Length) bytes"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+          Get-Content smoke.out, smoke.err -ErrorAction SilentlyContinue
+      - name: fetch-data.ps1 parse check
+        shell: pwsh
+        run: |
+          [void][scriptblock]::Create((Get-Content -Raw release\fetch-data.ps1))
+          Write-Host "fetch-data.ps1 parses"
+      - name: bake the release base into fetch-data.bat
+        shell: pwsh
+        run: |
+          $base = "https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}"
+          $p = 'release\fetch-data.bat'
+          (Get-Content -Raw $p).Replace('__ASSET_BASE__', $base) | Set-Content -Encoding Ascii $p
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: stage\www
+      - name: compile (ISCC)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $stamp = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd'), '${{ github.sha }}'.Substring(0, 7)
+          $iss = (Resolve-Path 'release\azeroth-survivors.iss').Path
+          $out = (Resolve-Path 'release').Path
+          $dAssetBase = "/DAssetBase=https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}"
+          $dStamp = "/DBuildStamp=$stamp"
+          Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
+          & $iscc $dAssetBase $dStamp "/O$out" $iss 2>&1 | ForEach-Object { Write-Host $_ }
+          Get-ChildItem "$out\setup" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release\setup\*.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -129,7 +191,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [wasm, host-bins, data]
+    needs: [wasm, host-bins, windows, data]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -154,6 +216,10 @@ jobs:
         with:
           name: data-parts
           path: stage/data
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: stage/setup
       - name: pack the release assets
         run: |
           mkdir -pv assets
@@ -161,7 +227,8 @@ jobs:
           sed -i "s|__ASSET_BASE__|https://github.com/${REPO}/releases/download/${TAG}|g" assets/install.sh
           tar -czf assets/client.tar.gz -C stage web
           tar -czf assets/host.tar.gz -C stage bins
-          (cd assets && sha256sum install.sh client.tar.gz host.tar.gz > assets.sha256)
+          cp stage/setup/*.exe assets/azeroth-survivors-setup.exe
+          (cd assets && sha256sum install.sh client.tar.gz host.tar.gz azeroth-survivors-setup.exe > assets.sha256)
           if [ -d stage/data ]; then
             cp stage/data/* assets/
             (cd assets && sha256sum wow-data.tar.part-* >> assets.sha256)
@@ -173,8 +240,9 @@ jobs:
             echo
             echo "| asset | what |"
             echo "| --- | --- |"
+            echo "| azeroth-survivors-setup.exe | **the Windows installer** — client, wenilla-host.exe and launcher; fetches the WoW data into the install's Data folder on first run |"
             echo "| client.tar.gz + install.sh | the browser client and the cross-platform host installer |"
-            echo "| host.tar.gz | prebuilt wenilla-host server binaries (linux + windows) |"
+            echo "| host.tar.gz | prebuilt wenilla-host server binaries (linux) |"
             if [ -d stage/data ]; then
               echo "| wow-data.tar.part-* | the WoW 1.12.1 client's Data folder, split below GitHub's 2 GiB per-asset ceiling |"
               echo "| sha256.txt | checksum of the data, as one concatenated stream |"
